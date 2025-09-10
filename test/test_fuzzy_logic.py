@@ -1,6 +1,7 @@
 """Test module to construct and check transitivity characteristics for fuzzy graphs."""
 
 import numpy as np
+from pathlib import Path
 from src.embedding.scores import load_matrix
 from src.service.fuzzy_logic import (
     best_simple_path,
@@ -10,6 +11,11 @@ from src.service.fuzzy_logic import (
     maxprod_transitive_closure,
     transitivity_violations
 )
+
+
+HERE = Path(__file__).parent
+DATA_FILE_SMALL = HERE.parent / "test_data" / "eclass-scores-14-qwen3.sqlite"
+DATA_FILE_BIG = HERE.parent / "test_data" / "eclass-scores-46-qwen3.sqlite"
 
 
 def test_maxprod_composition():
@@ -78,7 +84,7 @@ def test_maxprod_closure():
 
 def test_loading_small():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-14-qwen3.sqlite",
+        DATA_FILE_SMALL.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
@@ -101,7 +107,7 @@ def test_loading_small():
 
 def test_loading_big():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-46-qwen3.sqlite",
+        DATA_FILE_BIG.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
@@ -124,7 +130,7 @@ def test_loading_big():
 
 def test_violations_small():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-14-qwen3.sqlite",
+        DATA_FILE_SMALL.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
@@ -196,7 +202,7 @@ def test_violations_small():
 
 def test_violations_big():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-46-qwen3.sqlite",
+        DATA_FILE_BIG.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
@@ -1583,7 +1589,7 @@ def test_violations_big():
 
 def test_simple_paths_small():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-14-qwen3.sqlite",
+        DATA_FILE_SMALL.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
@@ -1601,7 +1607,7 @@ def test_simple_paths_small():
 
 def test_simple_paths_big():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-46-qwen3.sqlite",
+        DATA_FILE_BIG.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
@@ -1619,7 +1625,7 @@ def test_simple_paths_big():
 
 def test_best_simple_path_small():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-14-qwen3.sqlite",
+        DATA_FILE_SMALL.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
@@ -1634,7 +1640,7 @@ def test_best_simple_path_small():
 
 def test_best_simple_path_big():
     m, row_idx, col_idx = load_matrix(
-        "../test_data/eclass-scores-46-qwen3.sqlite",
+        DATA_FILE_BIG.as_posix(),
         table="similarities",
         dtype=np.float64,
         chunk_size=200_000
