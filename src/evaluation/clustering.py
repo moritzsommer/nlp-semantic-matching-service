@@ -11,7 +11,7 @@ import umap
 from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import normalize
 
-from src.utils.io import load_json
+from src.utils.json_io import load_json
 from src.utils.logger import LoggerFactory
 
 
@@ -148,7 +148,6 @@ def cluster_and_plot(
 
 if __name__ == "__main__":
     # Settings
-    apply_filters = True  # Run clustering on filtered or unfiltered data
     run_per_segment = False  # Compute clusters per segment or in one run
     exceptions = []  # Exclude specific segments if run per segment
     transformer = "bge"  # Cluster embeddings from this transformer (qwen3, bge, gemini)
@@ -156,7 +155,6 @@ if __name__ == "__main__":
     # Setup
     logger = LoggerFactory.get_logger(__name__)
     logger.info(f"Initialising clustering ...")
-    input_dir = "filtered" if apply_filters else "unfiltered"
 
     if run_per_segment:
         # Compute clusters for each segment
@@ -165,11 +163,11 @@ if __name__ == "__main__":
             if segment in exceptions:
                 logger.warning(f"Skipping segment {segment}.")
                 continue
-            input_path = f"../../data/embedded/{input_dir}/eclass-{segment}-embeddings-{transformer}.json"
-            output_path = f"../../visualisation/eclass-{segment}-embeddings-{input_dir}-{transformer}.html"
+            input_path = f"../../data/embedded-classes/eclass-{segment}-embeddings-{transformer}.json"
+            output_path = f"../../visualisation/eclass-{segment}-embeddings-{transformer}.html"
             cluster_and_plot(input_path, output_path, transformer, str(segment), logger)
     else:
         # Compute clusters for combined segments
-        input_path = f"../../data/embedded/{input_dir}/eclass-all-embeddings-{transformer}.json"
-        output_path = f"../../visualisation/eclass-all-embeddings-{input_dir}-{transformer}.html"
+        input_path = f"../../data/embedded-classes/eclass-0-embeddings-{transformer}.json"
+        output_path = f"../../visualisation/eclass-0-embeddings-{transformer}.html"
         cluster_and_plot(input_path, output_path, transformer, "All", logger)

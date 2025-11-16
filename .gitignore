@@ -107,14 +107,26 @@ local_settings.py
 *.log
 
 # Folders with embedding that is not allowed to be public
-data/embedded/unfiltered/*
-!data/embedded/unfiltered/.gitkeep
+data/embedded-classes/*
+!data/embedded-classes/.gitkeep
 
-data/embedded/filtered/*
-!data/embedded/filtered/.gitkeep
+data/extracted-classes/1-original-classes/*
+!data/extracted-classes/1-original-classes/.gitkeep
 
-data/extracted/*
-!data/extracted/.gitkeep
+data/extracted-classes/2-filtered-classes/*
+!data/extracted-classes/2-filtered-classes/.gitkeep
+
+data/extracted-classes/3-normalised-classes/*
+!data/extracted-classes/3-normalised-classes/.gitkeep
+
+data/extracted-properties/1-original-properties/*
+!data/extracted-properties/1-original-properties/.gitkeep
+
+data/extracted-properties/2-filtered-properties/*
+!data/extracted-properties/2-filtered-properties/.gitkeep
+
+data/extracted-properties/3-normalised-properties/*
+!data/extracted-properties/3-normalised-properties/.gitkeep
 
 data/original/*
 !data/original/.gitkeep
@@ -127,3 +139,9 @@ visualisation/*
 
 # Local model files
 models
+
+# Specific logs
+/logs/eclass-classes-definitions-misspelled-paper.txt
+/logs/eclass-classes-definitions-watermarks-paper.txt
+/logs/eclass-properties-definitions-misspelled-paper.txt
+/logs/eclass-properties-definitions-watermarks-paper.txt

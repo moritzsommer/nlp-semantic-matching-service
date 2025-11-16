@@ -6,22 +6,24 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
 
-import pandas as pd
 from openai import OpenAI
 from spellchecker import SpellChecker
-from src.embedding.filter import (filter_definitions_missing,
-                                  filter_definitions_missing_suffix,
-                                  filter_definitions_structural)
-from utils.logger import LoggerFactory
 
-from evaluation.filter import (filter_chemical_compounds,
-                               filter_correct_spellings)
+from embedding.csv_2_filter import STRUCTURAL_SET
+from evaluation.filter_spelling import (filter_chemical_compounds,
+                                        filter_correct_spellings)
+from src.evaluation.filter_non_semantic import (
+    filter_definitions_missing, filter_definitions_missing_suffix)
+from utils.csv_io import load_csv
+from utils.logger import LoggerFactory
+from utils.lookup import lookup_definition
 
 MISSING_SET = frozenset(filter_definitions_missing)
 MISSING_SUFFIXES = tuple(filter_definitions_missing_suffix)
-STRUCTURAL_SET = frozenset(filter_definitions_structural)
+STRUCTURAL_SET = frozenset(STRUCTURAL_SET)
 SPELLING_SET = frozenset(filter_correct_spellings)
 CHEMICAL_SET = frozenset(filter_chemical_compounds)
 
@@ -32,6 +34,7 @@ class SegmentStats:
 
     count: int
     definitions: int
+    inaccurate_ids: List[str]
 
 
 @dataclass(frozen=True)
@@ -39,216 +42,137 @@ class CheckerStats:
     """Aggregated ECLASS inaccuracy results across several segments for one checker."""
 
     name: str
-    semantic_definitions_only: bool
-    total_inaccuracies: int
-    total_definitions: int
+    data_dir: str
     by_segment: Dict[int, SegmentStats]
 
 
-def _load_segment(input_path: str, seg: int, logger: logging.Logger) -> Optional[pd.DataFrame]:
-    """Load an ECLASS segment and validate required columns."""
-
-    try:
-        database = pd.read_csv(input_path.format(segment=seg), sep=",")
-        #logger.info(f"Database loaded from {input_path} with {len(database)} rows.")
-    except Exception as e:
-        logger.error(f"Failed to read file: {input_path}, Error: {e}")
-        return None
-
-    required = {"id", "preferred-name", "definition"}
-    missing = required - set(database.columns)
-    if missing:
-        logger.error(f"Missing required column: {missing}")
-        return None
-
-    return database
-
-
 class InaccuracyChecker(ABC):
-    """Abstract interface for counting ECLASS definition inaccuracies."""
+    """Abstract interface for returning ECLASS definition inaccuracies."""
 
-    def __init__(self, name: str, semantic_definitions_only: bool = True, normalise_strings: bool = True):
+    def __init__(self, name: str, data_dir: str):
         self.name = name
-        self.semantic_definitions_only = semantic_definitions_only
-        self.normalise_strings = normalise_strings
+        self.data_dir = data_dir
 
     @abstractmethod
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
-        """Return count for this ECLASS definition inaccuracy inside one segment."""
+    def find_inaccuracies(self, ids, names, definitions) -> List[str]:
+        """Return a list of IRDIs for all definitions that contain this inaccuracy type"""
 
         raise NotImplementedError
 
-    @staticmethod
-    def _trim_wrappers(s: str) -> str:
-        s = s.strip()
-        leading = '([{"\'«“‚‹'
-        trailing = ')]}"\'»”’›'
-        while s and s[0] in leading:
-            s = s[1:].lstrip()
-        while s and s[-1] in trailing:
-            s = s[:-1].rstrip()
-        return s
-
-    @staticmethod
-    def _is_semantic(definition: str) -> bool:
-        if not definition:
-            return False
-        if definition in MISSING_SET:
-            return False
-        if definition.endswith(MISSING_SUFFIXES):
-            return False
-        if definition in STRUCTURAL_SET:
-            return False
-        return True
-
-    @staticmethod
-    def filter_semantic_pairs(pairs: Iterable[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
-        """Filter definitions, their names and ids by excluding entries with missing and placeholder definitions."""
-
-        out = []
-        for id, name, definition in pairs:
-            if InaccuracyChecker._is_semantic(definition):
-                out.append((id, name, definition))
-        return out
-
-    @staticmethod
-    def normalise(s: Optional[str]) -> str:
-        """Return a normalised string."""
-
-        # Normalise by mapping none to an empty string
-        if not s:
-            return ""
-
-        # Normalise by turning space-like characters into normal spaces
-        trans = {
-            0x00A0: 0x0020,  # NO-BREAK SPACE
-            0x202F: 0x0020,  # NARROW NO-BREAK SPACE
-        }
-        s = s.translate(trans)
-
-        # Normalise by stripping the string
-        s = s.strip()
-
-        # Normalise by removing wrapping characters
-        s = InaccuracyChecker._trim_wrappers(s)
-
-        # Normalise by collapsing whitespaces
-        s = " ".join(s.split())
-
-        # Normalise by using lower case only
-        s = s.lower()
-
-        return s
-
     def run(
             self,
-            input_path: str,
+            base_dir: str,
             segments: List[int],
             exceptions: List[int],
             logger: logging.Logger,
     ) -> CheckerStats:
-        """Execute this checker across several segments and return the aggregated ECLASS inaccuracy result."""
+        """Execute this checker once per segment and once on the combined file and return the aggregated ECLASS
+        inaccuracy result."""
 
+        format_dir = Path(base_dir) / self.data_dir
         exc = set(exceptions)
         by_segment: Dict[int, SegmentStats] = {}
-        total_inaccuracy_count = 0
-        total_definition_count = 0
+        ALL_SEGMENT = 0  # Convention, key "0" represents the stats for the combined file "eclass-0.csv"
 
-        for seg in segments:
+        # Per segment and combined run
+        for seg in segments + [ALL_SEGMENT]:
             if seg in exc:
                 logger.warning(f"Skipping segment {seg}.")
                 continue
 
             # Load data
-            database_segment = _load_segment(input_path, seg, logger)
-            if database_segment is None:
+            segment_path = format_dir / f"eclass-{seg}.csv"
+            df = load_csv(segment_path, "id", "preferred-name", "definition", logger)
+            if df is None:
+                continue
+            df_iter = (
+                df[["id", "preferred-name", "definition"]]
+                .dropna(subset=["id", "preferred-name", "definition"])
+                .astype({"id": str, "preferred-name": str, "definition": str})
+                .itertuples(index=False, name=None)
+            )
+            triplets = list(df_iter)
+            if not triplets:
+                by_segment[seg] = SegmentStats(count=0, definitions=0, inaccurate_ids=[])
                 continue
 
-            database_segment = (
-                database_segment[["id", "preferred-name", "definition"]].
-                dropna(subset=["id", "preferred-name", "definition"]).
-                astype({"id": str, "preferred-name": str, "definition": str}).
-                itertuples(index=False, name=None)
+            # Find inaccuracies
+            ids, names, definitions = (list(t) for t in zip(*triplets))
+            inaccurate_ids = self.find_inaccuracies(ids, names, definitions)
+            seg_inacc_count = len(inaccurate_ids)
+            seg_def_count = len(definitions)
+
+            by_segment[seg] = SegmentStats(
+                count=seg_inacc_count,
+                definitions=seg_def_count,
+                inaccurate_ids=inaccurate_ids
             )
 
-            # Remove non-semantic definitions
-            if self.semantic_definitions_only:
-                database_segment = self.filter_semantic_pairs(database_segment)
-
-            # Normalise all strings
-            if self.normalise_strings:
-                normed = []
-                for id, name, definition in database_segment:
-                    name_n = self.normalise(name)
-                    definition_n = self.normalise(definition)
-                    normed.append((id, name_n, definition_n))
-                database_segment = normed
-
-            # Count inaccuracies
-            ids, names, definitions = (list(t) for t in zip(*database_segment))
-            segment_definition_count = len(definitions)
-            segment_inaccuracy_count = self.count_inaccuracies(ids, names, definitions)
-
-            by_segment[seg] = SegmentStats(count=segment_inaccuracy_count, definitions=segment_definition_count)
-            total_inaccuracy_count += segment_inaccuracy_count
-            total_definition_count += segment_definition_count
-
-            # Log the output
-            filtered_flag = "yes" if self.semantic_definitions_only else "no"
-            pct = segment_inaccuracy_count / segment_definition_count * 100 if segment_definition_count > 0 else 0
+            # Log results
+            pct = seg_inacc_count / seg_def_count * 100 if seg_def_count > 0 else 0.0
+            seg_label = "combined" if seg == 0 else str(seg)
             logger.info(
-                "[%s] Segment %s: filtered = %s, total = %d, inaccuracies = %d (%.2f%%)",
-                self.name, seg, filtered_flag, segment_definition_count, segment_inaccuracy_count, pct
+                "[%s] Segment %s (%s): total = %d, inaccuracies = %d (%.2f%%)",
+                self.name,
+                seg_label,
+                self.data_dir,
+                seg_def_count,
+                seg_inacc_count,
+                pct
             )
 
+        # Return aggregated results
         return CheckerStats(
             name=self.name,
-            semantic_definitions_only=self.semantic_definitions_only,
-            total_inaccuracies=total_inaccuracy_count,
-            total_definitions=total_definition_count,
+            data_dir=self.data_dir,
             by_segment=by_segment
         )
 
 
 class MissingDefinitionChecker(InaccuracyChecker):
-    """Count ECLASS definitions considered missing via exact or suffix filter rules. Consider all definitions."""
+    """Count ECLASS definitions considered missing via exact or suffix filter rules."""
 
-    def __init__(self):
-        super().__init__(name="missing-definition", semantic_definitions_only=False, normalise_strings=False)
+    def __init__(self, data_dir: str):
+        super().__init__(name="missing-definition", data_dir=data_dir)
 
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
-        return sum(1 for d in definitions if d in MISSING_SET or d.endswith(MISSING_SUFFIXES))
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        return [
+            id for id, definition in zip(ids, definitions)
+            if not definition or definition in MISSING_SET or definition.endswith(MISSING_SUFFIXES)
+        ]
 
 
 class StructuralDefinitionChecker(InaccuracyChecker):
-    """Count ECLASS definitions considered structural via exact filter rules. Consider all definitions."""
+    """Count ECLASS definitions considered structural via exact filter rules."""
 
-    def __init__(self):
-        super().__init__(name="structural-definition", semantic_definitions_only=False, normalise_strings=False)
+    def __init__(self, data_dir: str):
+        super().__init__(name="structural-definition", data_dir=data_dir)
 
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
-        return sum(1 for d in definitions if d in STRUCTURAL_SET)
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        return [
+            id for id, d in zip(ids, definitions)
+            if d in STRUCTURAL_SET
+        ]
 
 
 class NoFullStopChecker(InaccuracyChecker):
-    """Count ECLASS definitions that do not end with a full stop. Consider only semantic definitions."""
+    """Count ECLASS definitions that do not end with a full stop."""
 
-    def __init__(self):
-        super().__init__(name="no-full-stop")
+    def __init__(self, data_dir: str):
+        super().__init__(name="no-full-stop", data_dir=data_dir)
 
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
-        count = 0
-        for definition in definitions:
-            if definition and not definition.endswith("."):
-                count += 1
-        return count
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        return [
+            id for id, d in zip(ids, definitions)
+            if d and not d.endswith(".")
+        ]
 
 
 class NoCapitalStartChecker(InaccuracyChecker):
     """Count definitions where the first alphabetic character is lowercase."""
 
-    def __init__(self):
-        super().__init__(name="no-capital-start", normalise_strings=False)
+    def __init__(self, data_dir: str):
+        super().__init__(name="no-capital-start", data_dir=data_dir)
 
     @staticmethod
     def _first_alpha_char(s: str) -> Optional[str]:
@@ -257,13 +181,14 @@ class NoCapitalStartChecker(InaccuracyChecker):
                 return character
         return None
 
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
-        count = 0
-        for definition in definitions:
-            character = self._first_alpha_char(definition)
-            if character is not None and character.islower():
-                count += 1
-        return count
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        return [
+            id for id, d in zip(ids, definitions)
+            if (
+                    (ch := self._first_alpha_char(d)) is not None
+                    and ch.islower()
+            )
+        ]
 
 
 class SpellingChecker(InaccuracyChecker):
@@ -273,13 +198,14 @@ class SpellingChecker(InaccuracyChecker):
 
     def __init__(
             self,
+            data_dir: str,
             languages: Iterable[str] = ("en",),
             ignore_all_caps: bool = True,
             ignore_with_digits: bool = True,
             ignore_chemical_compounds: bool = True,
             min_len: int = 4
     ):
-        super().__init__(name="spelling")
+        super().__init__(name="spelling", data_dir=data_dir)
         self.whitelist = SPELLING_SET
         self.llm_cache: Dict[str, Optional[bool]] = {}
         self.client = OpenAI(api_key="PLACEHOLDER")  # OpenAI API key needed
@@ -296,8 +222,6 @@ class SpellingChecker(InaccuracyChecker):
             if self.whitelist:
                 sp.word_frequency.load_words(self.whitelist)
             self.spellers.append(sp)
-
-        open("eclass-definitions-misspelled.txt", "w", encoding="utf-8").close()
 
     @staticmethod
     def _check_chemical_token(
@@ -385,10 +309,10 @@ class SpellingChecker(InaccuracyChecker):
             return content == "true"
         return None
 
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
-        defs_with_errors = 0
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        inaccurate_ids: List[str] = []
+
         for id, definition in zip(ids, definitions):
-            has_error = False
             for token in self._tokenize(definition):
                 # Check if the current word should be skipped
                 if self._is_ignored(token):
@@ -407,38 +331,74 @@ class SpellingChecker(InaccuracyChecker):
                 if verdict is False:
                     continue
                 else:
-                    has_error = True
-                    with open("eclass-definitions-misspelled.txt", "a", encoding="utf-8") as f:
-                        f.write(f"{id} - {key}: {definition}\n")
+                    inaccurate_ids.append(id)
                     break
 
-            if has_error:
-                defs_with_errors += 1
-
-        return defs_with_errors
+        return inaccurate_ids
 
 
 class DuplicateDefinitionChecker(InaccuracyChecker):
-    """Count definitions that occur more than once in the same segment."""
+    """Count definitions that occur more than once."""
 
-    def __init__(self):
-        super().__init__(name="duplicate-definition")
+    def __init__(self, data_dir: str):
+        super().__init__(name="duplicate-definition", data_dir=data_dir)
 
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
         norm_to_ids = {}
         for id, definition in zip(ids, definitions):
             norm_to_ids.setdefault(definition, []).append(id)
 
         # Count every occurrence in groups with size > 1
-        dup_count = sum(len(value) for value in norm_to_ids.values() if len(value) > 1)
-        return dup_count
+        duplicate_ids = []
+        for id_list in norm_to_ids.values():
+            if len(id_list) > 1:
+                duplicate_ids.extend(id_list)
+        return duplicate_ids
+
+
+class DuplicateNameDefinitionChecker(InaccuracyChecker):
+    """Count definitions that occur more than once together with the same preferred-name."""
+
+    def __init__(self, data_dir: str):
+        super().__init__(name="duplicate-name-definition", data_dir=data_dir)
+
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        pair_to_ids: Dict[tuple, List[str]] = {}
+        for id_, name, definition in zip(ids, names, definitions):
+            key = (name, definition)
+            pair_to_ids.setdefault(key, []).append(id_)
+
+        # Count every occurrence in groups with size > 1
+        duplicate_ids: List[str] = []
+        for id_list in pair_to_ids.values():
+            if len(id_list) > 1:
+                duplicate_ids.extend(id_list)
+
+        return duplicate_ids
+
+
+class NameEqualsDefinitionChecker(InaccuracyChecker):
+    """Find definitions where the name and the definition are identical."""
+
+    def __init__(self, data_dir: str):
+        super().__init__(name="name-equals-definition", data_dir=data_dir)
+
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        invalid_ids = []
+        for id_, name, definition in zip(ids, names, definitions):
+            norm_name = re.sub(r"\s+", " ", name.lower().strip())
+            norm_def = re.sub(r"\s+", " ", definition.lower().strip())
+            if norm_name == norm_def:
+                invalid_ids.append(id_)
+
+        return invalid_ids
 
 
 class HiddenCharWatermarkChecker(InaccuracyChecker):
     """Count definitions containing hidden Unicode characters often used as watermarks by LLMs."""
 
-    def __init__(self):
-        super().__init__(name="hidden-watermark", normalise_strings=False)
+    def __init__(self, data_dir: str):
+        super().__init__(name="hidden-watermark", data_dir=data_dir)
         self.HIDDEN_CHARS = {
             "\u00A0": "NO-BREAK SPACE",
             "\u200B": "ZERO WIDTH SPACE",
@@ -449,62 +409,104 @@ class HiddenCharWatermarkChecker(InaccuracyChecker):
             "\uFEFF": "ZERO WIDTH NO-BREAK SPACE",
         }
 
-        open("eclass-definitions-watermarks.txt", "w", encoding="utf-8").close()
-
     def _contains_hidden_char(self, s: str) -> bool:
         return any(character in s for character in self.HIDDEN_CHARS)
 
-    def count_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> int:
-        count = 0
+    def find_inaccuracies(self, ids: List[str], names: List[str], definitions: List[str]) -> List[str]:
+        inaccurate_ids = []
         for id, definition in zip(ids, definitions):
             if definition and self._contains_hidden_char(definition):
-                count += 1
-                with open("eclass-definitions-watermarks.txt", "a", encoding="utf-8") as f:
-                    f.write(f"{id}: {definition}\n")
-        return count
+                inaccurate_ids.append(id)
+        return inaccurate_ids
 
 
 def run_checkers(
         checkers: List[InaccuracyChecker],
-        input_path: str,
+        base_dir: str,
         segments: List[int],
         exceptions: List[int],
         logger: logging.Logger,
 ) -> Dict[str, CheckerStats]:
-    """Run multiple checkers and return results keyed by checker name."""
+    """Run multiple inaccuracy checkers and return their aggregated results."""
 
     results: Dict[str, CheckerStats] = {}
     for checker in checkers:
-        res = checker.run(input_path, segments, exceptions, logger)
-        results[res.name] = res
+        stats = checker.run(
+            base_dir=base_dir,
+            segments=segments,
+            exceptions=exceptions,
+            logger=logger,
+        )
+        results[checker.name] = stats
     return results
 
 
 if __name__ == "__main__":
-    logger = LoggerFactory.get_logger(__name__)
-    logger.info("Initialising ECLASS inaccuracy run ...")
+    mode = "classes"  # Categorisation classes via "classes", properties via "properties"
 
+    # Initialise
+    logger = LoggerFactory.get_logger(__name__)
+    file_handler = logging.FileHandler(f"eclass-{mode}-inaccuracy-run.txt", mode="w", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.info("Initialising ECLASS inaccuracy checkers ...")
+    base_dir = f"../../data/extracted-{mode}"
     segments = list(range(13, 52)) + [90]
     exceptions = []
-    input_path = "../../data/extracted/eclass-{segment}.csv"
 
     # Run all checkers
     checkers = [
-        MissingDefinitionChecker(),
-        StructuralDefinitionChecker(),
-        NoFullStopChecker(),
-        NoCapitalStartChecker(),
-        #SpellingChecker(),
-        DuplicateDefinitionChecker(),
-        HiddenCharWatermarkChecker(),
+        MissingDefinitionChecker(data_dir=f"1-original-{mode}"),
+        StructuralDefinitionChecker(data_dir=f"1-original-{mode}"),
+        NoFullStopChecker(data_dir=f"2-filtered-{mode}"),
+        NoCapitalStartChecker(data_dir=f"2-filtered-{mode}"),
+        #SpellingChecker(data_dir=f"2-filtered-{mode}"),
+        DuplicateDefinitionChecker(data_dir=f"3-normalised-{mode}"),
+        DuplicateNameDefinitionChecker(data_dir=f"3-normalised-{mode}"),
+        NameEqualsDefinitionChecker(data_dir=f"3-normalised-{mode}"),
+        HiddenCharWatermarkChecker(data_dir=f"2-filtered-{mode}")
     ]
-    results = run_checkers(checkers, input_path, segments, exceptions, logger)
+    results = run_checkers(
+        checkers=checkers,
+        base_dir=base_dir,
+        segments=segments,
+        exceptions=exceptions,
+        logger=logger
+    )
 
     # Log results
-    for name, res in results.items():
-        filtered_flag = "yes" if res.semantic_definitions_only else "no"
-        pct = (res.total_inaccuracies / res.total_definitions * 100.0) if res.total_definitions else 0.0
+    logger.info("=== Aggregated Results ===")
+    for checker_name, stats in results.items():
+        overall = stats.by_segment.get(0)
+        pct = (overall.count / overall.definitions * 100) if overall.definitions else 0.0
         logger.info(
-            "[%s] Overall: filtered = %s, total = %d, inaccuracies = %d (%.2f%%)",
-            name, filtered_flag, res.total_definitions, res.total_inaccuracies, pct
+            "[%s | %s] Combined -> definitions: %d | inaccuracies: %d (%.2f%%)",
+            stats.name,
+            stats.data_dir,
+            overall.definitions,
+            overall.count,
+            pct
         )
+
+    # Write watermark and spelling files
+    watermark_checker = results.get("hidden-watermark")
+    if watermark_checker:
+        overall = watermark_checker.by_segment.get(0)
+        if overall and overall.inaccurate_ids:
+            output_dir = base_dir + "/" + watermark_checker.data_dir
+            with open(f"eclass-{mode}-definitions-watermarks.txt", "w", encoding="utf-8") as f:
+                for irdi in overall.inaccurate_ids:
+                    definition = lookup_definition(irdi, output_dir)
+                    f.write(f"{irdi}: {definition}\n")
+
+    spelling_checker = results.get("spelling")
+    if spelling_checker:
+        overall = spelling_checker.by_segment.get(0)
+        if overall and overall.inaccurate_ids:
+            output_dir = base_dir + "/" + spelling_checker.data_dir
+            with open(f"eclass-{mode}-definitions-misspelled.txt", "w", encoding="utf-8") as f:
+                for irdi in overall.inaccurate_ids:
+                    definition = lookup_definition(irdi, output_dir)
+                    f.write(f"{irdi}: {definition}\n")

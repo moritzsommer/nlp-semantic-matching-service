@@ -12,12 +12,13 @@ The aim is to develop a proof-of-concept [Semantic Matching Service](https://git
 semantic-matching-nlp-eclass/
 │
 ├── data/                           # All data
-│   ├── embedded/                   # Embeddings
-│   │   ├── filtered/               # Filtered Embeddings
-│   │   └── unfiltered/             # Unfiltered Embeddings
-│   ├── extracted/                  # Extracted data
+│   ├── embedded-classes/           # Embeddings of all classes
+│   ├── extracted-classes/          # Extracted classes from original files
+│   ├── extracted-properties/       # Extracted properties from original files
 │   ├── original/                   # Original data
 │   └── scores/                     # Matching scores
+│
+├── logs/                           # Log files of important experiments
 │
 ├── src/                            # Source code
 │   ├── embedding/                  # Data preprocessing and embeddings generation

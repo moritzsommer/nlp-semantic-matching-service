@@ -113,8 +113,8 @@ def load_matrix(
 
 if __name__ == '__main__':
     compute_similarities(
-        "../../data/embedded/filtered/",
-        "qwen3",  # qwen3, bge, gemini
-        14,
+        "../../data/embedded-classes/",
+        "gemini",  # qwen3, bge, gemini
+        46,
         "../../data/scores/"
     )

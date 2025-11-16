@@ -13,3 +13,4 @@ scipy~=1.16.1
 pytest~=8.4.2
 pyspellchecker~=0.8.3
 openai~=2.0.1
+semantic-match-registry @ git+ssh://git@github.com/s-heppner/semantic-alignment-core.git@main#subdirectory=semantic_match_registry

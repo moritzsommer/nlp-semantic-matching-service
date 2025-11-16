@@ -222,7 +222,7 @@ if __name__ == "__main__":
     logger = LoggerFactory.get_logger(__name__)
     logger.info("Initialising non-semantic definition plotter ...")
     segments = list(range(13, 52)) + [90]
-    input_path = "../../data/extracted/eclass-{segment}.csv"
+    input_path = "../../data/original-classes/eclass-{segment}.csv"
     output_path = "../../visualisation/nonsemantic_definitions_ratio.png"
 
     # Run for each segment

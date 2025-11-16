@@ -7,23 +7,18 @@ import pandas as pd
 from google import genai
 from google.genai.types import EmbedContentConfig
 
-from src.embedding.filter import (filter_definitions_missing,
-                                  filter_definitions_missing_suffix,
-                                  filter_definitions_structural)
-from src.utils.io import save_json
+from src.utils.json_io import save_json
 from src.utils.logger import LoggerFactory
 
 
 def embed_eclass(
         input_path: str,
         output_path: str,
-        logger: logging.Logger,
-        apply_filters: bool = True
+        logger: logging.Logger
 ) -> None:
-    """Loads ECLASS data, filters definitions, computes embeddings with Gemini, and saves the results as JSON."""
+    """Loads ECLASS data, computes embeddings with Gemini and saves the results as JSON."""
 
     logger.info(f"Starting embedder ...")
-    logger.info(f"Filters enabled: {apply_filters}")
 
     # Load ECLASS classes from CSV file
     try:
@@ -40,25 +35,8 @@ def embed_eclass(
             logger.error(f"Missing required column: {col}")
             return
 
-    # Filter definitions if enabled
-    valid_rows = []
-    for idx, row in database.iterrows():
-        definition = row["definition"]
-
-        if apply_filters:
-            if (
-                    definition in filter_definitions_missing
-                    or any(definition.endswith(suffix) for suffix in filter_definitions_missing_suffix)
-                    or definition in filter_definitions_structural
-            ):
-                logger.warning(f"Skipping row {idx}: non-semantic definition '{definition}'")
-                continue
-
-        valid_rows.append(row)
-    logger.info(f"Total valid rows for embedding: {len(valid_rows)}")
-
     # Compute embeddings, no batch mode
-    definitions = [row["definition"] for row in valid_rows]
+    definitions = database["definition"].tolist()
     embeddings = []
     logger.info("Computing embeddings ...")
     for definition in definitions:
@@ -87,7 +65,7 @@ def embed_eclass(
             "vector-norm": float(np.linalg.norm(embedding)),
             "embedding": embedding,
         }
-        for row, embedding in zip(valid_rows, embeddings)
+        for (_, row), embedding in zip(database.iterrows(), embeddings)
     ]
     logger.info(f"Embedding computation finished for {input_path}. Total processed: {len(embedded_entries)}")
     save_json(embedded_entries, output_path)
@@ -96,7 +74,6 @@ def embed_eclass(
 
 if __name__ == "__main__":
     # Settings
-    apply_filters = True  # Enable filtering of non-semantic definitions
     run_per_segment = True  # Compute embeddings per segment or in one run
     exceptions = []  # Exclude specific segments if run per segment
     project = "PLACEHOLDER"  # Project name from Google Cloud
@@ -104,7 +81,6 @@ if __name__ == "__main__":
     # Setup
     logger = LoggerFactory.get_logger(__name__)
     logger.info("Initialising embedder ...")
-    save_dir = "filtered" if apply_filters else "unfiltered"
 
     # Connect Gemini client via Vertex Ai
     client = genai.Client(vertexai=True, project=project, location="global")
@@ -112,16 +88,16 @@ if __name__ == "__main__":
 
     if run_per_segment:
         # Run for each segment
-        segments = list(range(13, 52)) + [90]
+        segments = [46]
         for segment in segments:
             if segment in exceptions:
                 logger.warning(f"Skipping segment {segment}.")
                 continue
-            input_path = f"../../data/extracted/eclass-{segment}.csv"
-            output_path = f"../../data/embedded/{save_dir}/eclass-{segment}-embeddings-gemini.json"
-            embed_eclass(input_path, output_path, logger, apply_filters=apply_filters)
+            input_path = f"../../data/extracted-classes/3-normalised-classes/eclass-{segment}.csv"
+            output_path = f"../../data/embedded-classes/eclass-{segment}-embeddings-gemini.json"
+            embed_eclass(input_path, output_path, logger)
     else:
         # Run for combined segments
-        input_path = f"../../data/extracted/eclass-all.csv"
-        output_path = f"../../data/embedded/{save_dir}/eclass-all-embeddings-gemini.json"
-        embed_eclass(input_path, output_path, logger, apply_filters=apply_filters)
+        input_path = f"../../data/extracted-classes/3-normalised-classes/eclass-0.csv"
+        output_path = f"../../data/embedded-classes/eclass-0-embeddings-gemini.json"
+        embed_eclass(input_path, output_path, logger)
