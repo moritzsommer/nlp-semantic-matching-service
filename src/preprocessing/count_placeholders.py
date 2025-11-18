@@ -6,9 +6,9 @@ from typing import Dict, List
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from src.embedding.filter import (filter_definitions_missing,
-                                  filter_definitions_missing_suffix,
-                                  filter_definitions_structural)
+from src.preprocessing.filter_non_semantic import (
+    filter_definitions_missing, filter_definitions_missing_suffix,
+    filter_definitions_structural)
 from src.utils.logger import LoggerFactory
 
 

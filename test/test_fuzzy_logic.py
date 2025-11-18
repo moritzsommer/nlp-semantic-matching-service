@@ -3,13 +3,11 @@
 from pathlib import Path
 
 import numpy as np
-
-from src.embedding.scores import load_matrix
-from src.service.fuzzy_logic import (best_simple_path, is_maxprod_transitive,
-                                     k_exact_simple_paths,
-                                     k_maxprod_composition,
-                                     maxprod_transitive_closure,
-                                     transitivity_violations)
+from src.logic.fuzzy_logic import (best_simple_path, is_maxprod_transitive,
+                                   k_exact_simple_paths, k_maxprod_composition,
+                                   maxprod_transitive_closure,
+                                   transitivity_violations)
+from src.logic.scores import load_matrix
 
 HERE = Path(__file__).parent
 DATA_FILE_SMALL = HERE.parent / "test_data" / "eclass-scores-14-qwen3.sqlite"

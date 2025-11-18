@@ -8,7 +8,7 @@ from typing import Iterable, Optional, Tuple
 
 import pandas as pd
 
-from src.evaluation.filter_non_semantic import (
+from preprocessing.filter_non_semantic import (
     filter_definitions_missing, filter_definitions_missing_suffix,
     filter_definitions_structural)
 from utils.csv_io import iter_csv_files, load_csv

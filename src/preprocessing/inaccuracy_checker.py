@@ -12,11 +12,11 @@ from typing import Dict, Iterable, List, Optional
 from openai import OpenAI
 from spellchecker import SpellChecker
 
-from embedding.csv_2_filter import STRUCTURAL_SET
-from evaluation.filter_spelling import (filter_chemical_compounds,
-                                        filter_correct_spellings)
-from src.evaluation.filter_non_semantic import (
+from preprocessing.csv_2_filter import STRUCTURAL_SET
+from preprocessing.filter_non_semantic import (
     filter_definitions_missing, filter_definitions_missing_suffix)
+from preprocessing.filter_spelling import (filter_chemical_compounds,
+                                           filter_correct_spellings)
 from utils.csv_io import load_csv
 from utils.logger import LoggerFactory
 from utils.lookup import lookup_definition

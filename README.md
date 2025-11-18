@@ -4,7 +4,7 @@
 
 This repository contains the implementation and evaluation code for my master's thesis _"NLP-Based Semantic Matching on ECLASS: Design and Validation of an Industrie 4.0 Matching Service"_ at the Chair of Information and Automation Systems for Process and Material Technology at RWTH Aachen University.
 
-The aim is to develop a proof-of-concept [Semantic Matching Service](https://github.com/s-heppner/python-semantic-matcher) that leverages NLP techniques to semantically match concept definitions from the [IEC 61360-2](https://webstore.iec.ch/en/publication/5381)-compliant [ECLASS](https://eclass.eu/en/eclass-standard/introduction) dictionary. Furthermore, the project aims to investigate occurring matching patterns, outliers and errors.
+The aim is to develop a proof-of-concept Semantic Matching Service that leverages NLP techniques to semantically match concept definitions from the [IEC 61360-2](https://webstore.iec.ch/en/publication/5381)-compliant [ECLASS](https://eclass.eu/en/eclass-standard/introduction) dictionary and to make the matchings accessible via a [Semantic Matching Registry](https://github.com/s-heppner/semantic-alignment-core). Furthermore, the project aims to investigate occurring matching patterns, outliers and errors.
 
 ## Project Structure
 
@@ -21,9 +21,9 @@ semantic-matching-nlp-eclass/
 ├── logs/                           # Log files of important experiments
 │
 ├── src/                            # Source code
-│   ├── embedding/                  # Data preprocessing and embeddings generation
-│   ├── evaluation/                 # Data evaluation and visualisation
-│   ├── service/                    # Semantic Matching Service
+│   ├── logic/                      # Embeddings generation and fuzzy logic core
+│   ├── preprocessing/              # Data preprocessing
+│   ├── registry/                   # Connection to the Semantic Matching Registry
 │   └── utils/                      # Helper functions
 │
 ├── test/                           # Unit testing
