@@ -38,6 +38,7 @@ def extract_eclass_xml(input_path: str, logger: logging.Logger) -> dict:
         for elem in elements:
             # Only keep class nodes of type "ontoml:CATEGORIZATION_CLASS_Type"
             xsi_type = elem.attrib.get(f"{{{ns['xsi']}}}type")
+            # change in here for checking properties
             if xsi_type != "ontoml:CATEGORIZATION_CLASS_Type":
                 continue
 

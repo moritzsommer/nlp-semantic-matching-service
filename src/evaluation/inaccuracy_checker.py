@@ -55,7 +55,7 @@ def _load_segment(input_path: str, seg: int, logger: logging.Logger) -> Optional
         logger.error(f"Failed to read file: {input_path}, Error: {e}")
         return None
 
-    required = {"id", "preferred-name", "definition"}
+    required = {"id", "preferred_name", "definition"}
     missing = required - set(database.columns)
     if missing:
         logger.error(f"Missing required column: {missing}")
@@ -165,9 +165,9 @@ class InaccuracyChecker(ABC):
                 continue
 
             database_segment = (
-                database_segment[["id", "preferred-name", "definition"]].
-                dropna(subset=["id", "preferred-name", "definition"]).
-                astype({"id": str, "preferred-name": str, "definition": str}).
+                database_segment[["id", "preferred_name", "definition"]].
+                dropna(subset=["id", "preferred_name", "definition"]).
+                astype({"id": str, "preferred_name": str, "definition": str}).
                 itertuples(index=False, name=None)
             )
 
@@ -486,7 +486,7 @@ if __name__ == "__main__":
 
     segments = list(range(13, 52)) + [90]
     exceptions = []
-    input_path = "../../data/extracted/eclass-{segment}.csv"
+    input_path = "../../data/extracted/properties/eclass-{segment}.csv"
 
     # Run all checkers
     checkers = [
